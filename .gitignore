@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+.env/
+
+# Dataset
+data/Online Retail.xlsx
+
+# Generated datasets
+data/cleaned_retail.csv
+data/customer_rfm.csv
+data/supervised_customer_data.csv
+data/model_results.csv
+data/evaluation_results.csv
+data/test_predictions.csv
+
+# Generated model files
+models/*.pkl
+
+# Streamlit
+.streamlit/
+
+# Jupyter
+.ipynb_checkpoints/
