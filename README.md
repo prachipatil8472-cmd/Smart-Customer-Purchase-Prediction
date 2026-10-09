@@ -1,33 +1,34 @@
-# 🛍️ Smart Customer Purchase Prediction Using Machine Learning
 
-## 📌 Project Overview
+# Smart Customer Purchase Prediction Using Machine Learning
 
-Smart Customer Purchase Prediction is a supervised machine learning project that analyzes historical customer transaction data and predicts whether a customer is likely to make a purchase in a future period.
+## 1. Project Overview
 
-The project uses real-world e-commerce transaction data and demonstrates the complete machine learning workflow, including data preprocessing, feature engineering, model building, model evaluation, and deployment through a Streamlit web application.
+This project uses supervised machine learning algorithms to predict whether a customer will make a purchase during a future period based on historical shopping behavior.
 
----
+The project demonstrates data cleaning, feature engineering, target creation, model training, evaluation, visualization, and an interactive Streamlit application.
 
-## 🎯 Objectives
+## 2. Problem Statement
 
-- Analyze real-world customer transaction data.
-- Perform data preprocessing and cleaning.
-- Handle missing values and duplicate records.
+Retail businesses need to understand customer purchasing behavior to improve customer engagement and plan marketing activities. This project analyzes historical retail transactions to predict future customer purchases.
+
+## 3. Objectives
+
+- Analyze real-world retail transaction data.
+- Clean missing, duplicate, and invalid records.
 - Perform feature engineering using RFM analysis.
-- Predict future customer purchasing behavior.
-- Compare multiple supervised machine learning algorithms.
-- Evaluate model performance using different metrics.
-- Build an interactive web application using Streamlit.
+- Define a future-purchase target variable.
+- Train and compare four supervised learning algorithms.
+- Evaluate models using multiple classification metrics.
+- Visualize model performance and feature importance.
+- Build an interactive Streamlit application.
 
----
+## 4. Dataset
 
-## 📊 Dataset
+**Dataset:** Online Retail Dataset  
+**Source:** UCI Machine Learning Repository  
+**Link:** https://archive.ics.uci.edu/dataset/352/online+retail
 
-### Online Retail Dataset
-
-The project uses the Online Retail dataset containing transaction records from a UK-based online retail store.
-
-### Dataset Features
+The original dataset contains 541,909 transaction records and eight columns:
 
 - InvoiceNo
 - StockCode
@@ -38,108 +39,102 @@ The project uses the Online Retail dataset containing transaction records from a
 - CustomerID
 - Country
 
-The dataset is available from the UCI Machine Learning Repository:
+The dataset represents historical transactions from a UK-based online retailer.
 
-https://archive.ics.uci.edu/dataset/352/online+retail
+## 5. Data Preprocessing
 
----
+The following operations were performed:
 
-## 🧹 Data Preprocessing
+1. Removed duplicate transaction records.
+2. Removed records with missing CustomerID.
+3. Removed records with Quantity less than or equal to zero.
+4. Removed records with UnitPrice less than or equal to zero.
+5. Converted InvoiceDate to datetime format.
+6. Created a TotalAmount feature.
 
-The following preprocessing techniques were applied:
+The TotalAmount feature is calculated as:
 
-- Removed duplicate records.
-- Removed records with missing CustomerID.
-- Removed invalid quantity values.
-- Removed invalid unit price values.
-- Converted InvoiceDate into datetime format.
-- Created TotalAmount feature.
+`TotalAmount = Quantity × UnitPrice`
 
-### Total Amount
+After these cleaning steps, 392,692 transaction records remained.
 
-TotalAmount was calculated as:
+## 6. Feature Engineering: RFM Analysis
 
-Quantity × UnitPrice
+Three customer-level features were generated:
 
----
+- **Recency:** Number of days since the customer's most recent purchase.
+- **Frequency:** Number of unique invoices/orders made by the customer.
+- **Monetary:** Total amount spent by the customer.
 
-## 🔧 Feature Engineering
+These features summarize historical customer behavior and are used as model inputs.
 
-RFM analysis was used to create customer-level features.
+## 7. Target Variable
 
-### Recency
+The target variable is `Purchase`.
 
-Number of days since the customer's most recent purchase.
+- `1`: The customer made a purchase during the final 30-day prediction period.
+- `0`: The customer did not make a purchase during that period.
 
-### Frequency
+Customer features are calculated from transactions before the future period to avoid using future transactions as input features.
 
-Number of unique orders made by the customer.
+## 8. Algorithms Implemented
 
-### Monetary
+### 8.1 Logistic Regression
 
-Total amount spent by the customer.
+A classification algorithm that estimates the probability of a customer making a future purchase.
 
-These features were used as input variables for the machine learning models.
+### 8.2 Decision Tree
 
----
+A tree-based classifier that applies feature-based decision rules to predict the target class.
 
-## 🤖 Machine Learning Algorithms
+### 8.3 Random Forest
 
-The following supervised learning algorithms were implemented:
+An ensemble learning algorithm that combines predictions from multiple decision trees.
 
-1. Logistic Regression
-2. Decision Tree
-3. Random Forest
-4. Gradient Boosting
+### 8.4 Gradient Boosting
 
-Random Forest and Gradient Boosting are ensemble learning techniques.
+An ensemble algorithm that builds models sequentially, with later models attempting to correct errors made by earlier models.
 
----
+## 9. Experimental Setup
 
-## 🎯 Target Variable
+- Train-test split: 80:20
+- Stratified splitting to preserve target-class proportions
+- Input features: Recency, Frequency, Monetary
+- Target: Purchase
+- Evaluation metrics: Accuracy, Precision, Recall, F1 Score, ROC-AUC
 
-The target variable represents whether a customer made a purchase during the defined future prediction period.
+## 10. Model Evaluation
 
-- `1` → Customer made a future purchase
-- `0` → Customer did not make a future purchase
+The models are evaluated using:
 
-Historical customer behavior was used to predict future purchasing behavior.
+- **Accuracy:** Proportion of all predictions that are correct.
+- **Precision:** Proportion of predicted purchases that are actual purchases.
+- **Recall:** Proportion of actual purchases correctly identified.
+- **F1 Score:** Harmonic mean of precision and recall.
+- **ROC-AUC:** Measures how well the model ranks the two classes.
 
----
+The project also generates confusion matrices and ROC curves for visual evaluation.
 
-## 📈 Model Evaluation
+## 11. Feature Importance Analysis
 
-The models were evaluated using:
+Permutation importance was calculated for Random Forest and Gradient Boosting using F1 Score.
 
-- Accuracy
-- Precision
-- Recall
-- F1 Score
-- ROC-AUC
-- Confusion Matrix
-- ROC Curve
+In the current experiment, Frequency had the highest permutation importance for both models, followed by Recency and Monetary.
 
-The model with the best F1 Score was selected as the final model.
+This indicates that purchase frequency contributed the most to predictive performance in these experiments.
 
----
+## 12. Application Features
 
-## 🖥️ Application
+The Streamlit application provides:
 
-A Streamlit web application was developed to provide an interactive interface.
-
-### Application Features
-
+- Home page and project workflow
 - Customer purchase prediction
 - Dataset analysis
-- Model comparison
-- Model evaluation
-- Confusion matrix
-- ROC curve
-- Feature analysis
+- Model performance comparison
+- Detailed model evaluation
+- Advanced analysis with generated graphs
 
----
-
-## 🛠️ Technologies Used
+## 13. Technologies Used
 
 - Python
 - Pandas
@@ -149,26 +144,83 @@ A Streamlit web application was developed to provide an interactive interface.
 - Seaborn
 - Streamlit
 - Joblib
-- Excel
-- Git
-- GitHub
+- Git and GitHub
 
----
+## 14. Project Workflow
 
-## 📁 Project Structure
+1. Load the UCI Online Retail dataset.
+2. Clean transaction data.
+3. Generate TotalAmount.
+4. Create customer-level RFM features.
+5. Define the future-purchase target.
+6. Split the data into training and testing sets.
+7. Train four supervised classification algorithms.
+8. Compare evaluation metrics.
+9. Analyze feature importance.
+10. Visualize results in the Streamlit application.
 
-```text
-Smart-Customer-Purchase-Prediction/
-│
-├── data/
-├── models/
-├── src/
-│   ├── data_analysis.py
-│   ├── create_target.py
-│   ├── train_model.py
-│   └── evaluation.py
-│
-├── app.py
-├── requirements.txt
-├── README.md
-└── .gitignore
+## 15. How to Run the Project
+
+### Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Download the dataset
+
+Download the Online Retail dataset from the UCI repository and place `Online Retail.xlsx` inside the `data` folder.
+
+### Run preprocessing and target creation
+
+```bash
+python src/data_analysis.py
+python src/create_target.py
+```
+
+### Train and evaluate the model
+
+```bash
+python src/train_model.py
+python src/evaluation.py
+```
+
+### Generate analysis graphs
+
+```bash
+python src/model_comparison.py
+python src/feature_analysis.py
+python src/compare_confusion_matrices.py
+python src/roc_comparison.py
+python src/feature_importance_analysis.py
+```
+
+### Launch the application
+
+```bash
+streamlit run app.py
+```
+
+## 16. Limitations
+
+- The model uses only three customer-level features.
+- Predictions depend on the historical transaction period and target definition.
+- Model performance may vary with different data splits and parameter settings.
+- Purchase behavior may change over time.
+- Further validation and model tuning may improve performance.
+
+## 17. Future Scope
+
+- Add more customer and product features.
+- Experiment with class balancing and hyperparameter tuning.
+- Evaluate performance on a later, independent time period.
+- Explore customer segmentation.
+- Deploy the application for wider access.
+
+## 18. Conclusion
+
+This project demonstrates a complete supervised machine learning workflow for predicting future customer purchasing behavior from real-world retail data. It combines preprocessing, RFM feature engineering, four classification algorithms, model evaluation, visual analysis, and a Streamlit application.
+
+## Author
+
+Prachi Patil

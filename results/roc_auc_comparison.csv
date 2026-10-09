@@ -1,0 +1,5 @@
+Model,ROC-AUC
+Logistic Regression,0.7318705888691341
+Gradient Boosting,0.7272944615053069
+Random Forest,0.6908538063681913
+Decision Tree,0.5915023436237272
