@@ -224,3 +224,33 @@ This project demonstrates a complete supervised machine learning workflow for pr
 ## Author
 
 Prachi Patil
+
+
+## 15. Additional Algorithms (Integrated)
+
+A new **🧩 New Algorithms** page has been added to the existing Streamlit application.
+
+### Customer clustering
+- **K-Means:** groups customers by distance to cluster centroids.
+- **K-Medoids (PAM-style):** uses actual customer observations as cluster representatives.
+- **DBSCAN:** identifies density-based clusters and noise/outlier points.
+- The module uses `data/customer_rfm.csv`, standardizes the RFM inputs, and saves a PCA visualization and customer labels under `results/`.
+- The default implementation analyses up to 1,500 sampled customers for responsiveness. Adjust this only if your computer can handle the extra computation.
+
+### Boosting comparison
+- **AdaBoost** and **Gradient Boosting** are trained on `data/supervised_customer_data.csv`.
+- Both use Recency, Frequency, and Monetary as inputs and Purchase as the target.
+- Results include Accuracy, Precision, Recall, F1 Score, and ROC-AUC, saved to `results/ensemble_comparison.csv`.
+- Compare results on the same split; the highest score is not guaranteed in advance.
+
+### HMM Forward and Viterbi
+- `src/hmm_algorithms.py` implements Forward sequence likelihood and Viterbi most-likely hidden-state decoding.
+- The app uses a small illustrative discrete HMM with symbols A/B. Its probabilities are demonstration values, not values learned from the Online Retail dataset, so the output should not be presented as a real customer-purchase prediction.
+
+### Run the updated application
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Open the **🧩 New Algorithms** page from the sidebar. Use the buttons in each tab to run the algorithms.

@@ -107,7 +107,8 @@ page = st.sidebar.radio(
         "📊 Dataset Analysis",
         "📈 Model Performance",
         "🔍 Model Evaluation",
-        "🧪 Advanced Analysis"
+        "🧪 Advanced Analysis",
+        "🧩 New Algorithms"
     ]
 )
 
@@ -484,6 +485,129 @@ elif page == "🧪 Advanced Analysis":
         st.dataframe(auc_df, hide_index=True, width="stretch")
     else:
         st.info("Run `python src/roc_comparison.py` to generate ROC-AUC results.")
+
+
+# =========================================================
+# NEW ALGORITHMS PAGE
+# =========================================================
+elif page == "🧩 New Algorithms":
+    st.title("🧩 Additional Algorithms")
+    st.caption("Added to the existing Smart Customer Purchase Prediction project.")
+
+    tab_cluster, tab_ensemble, tab_hmm = st.tabs([
+        "Customer Clustering", "Boosting Comparison", "HMM Forward & Viterbi"
+    ])
+
+    with tab_cluster:
+        st.subheader("Customer segmentation using RFM")
+        st.write(
+            "K-Means and K-Medoids form a requested number of groups. "
+            "DBSCAN groups dense regions and labels outliers as noise. "
+            "Features are scaled before clustering; the plot uses PCA only for display."
+        )
+        rfm_path = os.path.join(DATA_DIR, "customer_rfm.csv")
+        if not os.path.exists(rfm_path):
+            st.warning("Missing data/customer_rfm.csv. Please restore the existing RFM dataset.")
+        else:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                k_value = st.slider("K for K-Means / K-Medoids", 2, 8, 4)
+            with col2:
+                eps_value = st.slider("DBSCAN eps", 0.1, 3.0, 0.8, 0.1)
+            with col3:
+                min_samples_value = st.slider("DBSCAN min_samples", 3, 20, 8)
+            if st.button("Run clustering algorithms", key="run_customer_clustering"):
+                try:
+                    from src.customer_clustering import run_clustering
+                    summary, plot_path, labels_path = run_clustering(
+                        rfm_path, RESULTS_DIR, n_clusters=k_value,
+                        dbscan_eps=eps_value, min_samples=min_samples_value
+                    )
+                    st.session_state["cluster_summary"] = summary
+                    st.session_state["cluster_plot"] = plot_path
+                    st.session_state["cluster_labels"] = labels_path
+                except Exception as exc:
+                    st.error(f"Clustering failed: {exc}")
+            if "cluster_summary" in st.session_state:
+                st.dataframe(st.session_state["cluster_summary"], hide_index=True, width="stretch")
+                show_image_if_exists(st.session_state["cluster_plot"], "Customer cluster comparison (PCA projection)")
+                st.download_button(
+                    "Download customer cluster labels CSV",
+                    data=open(st.session_state["cluster_labels"], "rb").read(),
+                    file_name="customer_cluster_labels.csv",
+                    mime="text/csv"
+                )
+        st.info(
+            "K-Medoids is implemented with a PAM-style swap search. To keep it responsive, "
+            "the clustering module samples up to 1,500 customers by default."
+        )
+
+    with tab_ensemble:
+        st.subheader("AdaBoost vs Gradient Boosting")
+        st.write("Both models use the project's existing supervised customer dataset and the same 80:20 stratified split.")
+        supervised_path = os.path.join(DATA_DIR, "supervised_customer_data.csv")
+        if st.button("Train and compare boosting models", key="run_ensemble_comparison"):
+            try:
+                from src.ensemble_comparison import compare_ensembles
+                comparison = compare_ensembles(
+                    supervised_path,
+                    os.path.join(RESULTS_DIR, "ensemble_comparison.csv")
+                )
+                st.session_state["ensemble_comparison"] = comparison
+            except Exception as exc:
+                st.error(f"Ensemble comparison failed: {exc}")
+        if "ensemble_comparison" in st.session_state:
+            comp = st.session_state["ensemble_comparison"]
+            display_results_table(comp)
+            metric = st.selectbox(
+                "Metric to visualize",
+                ["Accuracy", "Precision", "Recall", "F1 Score", "ROC-AUC"],
+                key="ensemble_metric"
+            )
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.bar(comp["Model"], comp[metric])
+            ax.set_ylim(0, 1)
+            ax.set_ylabel(metric)
+            ax.set_title(f"AdaBoost vs Gradient Boosting — {metric}")
+            ax.grid(axis="y", alpha=0.25)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+            st.caption("Compare the measured metrics; neither algorithm is guaranteed to perform best.")
+
+    with tab_hmm:
+        st.subheader("Hidden Markov Model: Forward and Viterbi")
+        st.write(
+            "This is an educational discrete-HMM demonstration. The sample probabilities below "
+            "are illustrative, not learned from the retail dataset. Forward calculates the "
+            "observation-sequence probability; Viterbi finds the most likely hidden-state path."
+        )
+        symbols = {"A": 0, "B": 1}
+        seq_text = st.text_input("Observation sequence (use A and B, e.g. ABAB)", "ABAB").upper().replace(" ", "")
+        start = [0.6, 0.4]
+        transition = [[0.7, 0.3], [0.4, 0.6]]
+        emission = [[0.5, 0.5], [0.1, 0.9]]
+        st.code(
+            "Start probabilities: [0.6, 0.4]\n"
+            "Transition matrix: [[0.7, 0.3], [0.4, 0.6]]\n"
+            "Emission matrix: [[0.5, 0.5], [0.1, 0.9]]"
+        )
+        if st.button("Run HMM algorithms", key="run_hmm"):
+            if not seq_text or any(char not in symbols for char in seq_text):
+                st.error("Enter a sequence containing only A and B, such as ABAB.")
+            else:
+                try:
+                    from src.hmm_algorithms import forward_probability, viterbi_decode
+                    obs = [symbols[char] for char in seq_text]
+                    likelihood = forward_probability(start, transition, emission, obs)
+                    path, path_probability = viterbi_decode(start, transition, emission, obs)
+                    c1, c2 = st.columns(2)
+                    c1.metric("Forward sequence probability", f"{likelihood:.8f}")
+                    c2.metric("Viterbi path probability", f"{path_probability:.8f}")
+                    st.write("Most likely hidden-state path:", " → ".join(map(str, path)))
+                    st.caption("Hidden states are numbered 0 and 1. This example does not represent a trained customer prediction model.")
+                except Exception as exc:
+                    st.error(f"HMM calculation failed: {exc}")
 
 # =========================================================
 # SIDEBAR FOOTER
