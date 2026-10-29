@@ -1,732 +1,1001 @@
+
 import os
 import joblib
+import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
-# =====================================================
-# PAGE CONFIGURATION
-# =====================================================
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    AdaBoostClassifier,
+    GradientBoostingClassifier,
+    VotingClassifier
+)
+from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import SelectKBest, f_classif, mutual_info_classif
+from sklearn.cluster import DBSCAN
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    confusion_matrix,
+    classification_report,
+    roc_curve,
+    pairwise_distances
+)
+
+# ----------------------------------------------------------
+# PAGE CONFIG
+# ----------------------------------------------------------
 st.set_page_config(
     page_title="Smart Customer Purchase Prediction",
-    page_icon="🛍️",
+    page_icon="📊",
     layout="wide"
 )
 
-# =====================================================
-# CUSTOM DESIGN
-# =====================================================
+# ----------------------------------------------------------
+# CUSTOM THEME
+# ----------------------------------------------------------
 st.markdown("""
 <style>
 .stApp {
-    background: linear-gradient(135deg, #08111f, #10243a);
-    color: #edf5ff;
+    background-color: #0b1120;
+    color: #e5e7eb;
 }
 [data-testid="stSidebar"] {
-    background: #101b2d;
-    border-right: 1px solid #2dd4bf;
-}
-.block-container {
-    max-width: 1450px;
-    padding-top: 2rem;
+    background-color: #111827;
+    border-right: 1px solid #263449;
 }
 h1, h2, h3 {
-    color: #f4f8ff !important;
-}
-p, label {
-    color: #d6e2f1;
+    color: #f8fafc !important;
 }
 div[data-testid="stMetric"] {
-    background: #14243a;
-    border: 1px solid #2dd4bf55;
-    border-radius: 15px;
-    padding: 18px;
-}
-div[data-testid="stMetricLabel"] {
-    color: #9aacc3;
+    background-color: #151f32;
+    border: 1px solid #293850;
+    padding: 16px;
+    border-radius: 12px;
 }
 div[data-testid="stMetricValue"] {
-    color: #5eead4;
+    color: #2dd4bf;
 }
-.stButton > button, [data-testid="stFormSubmitButton"] button {
-    background: #14b8a6;
-    color: #061522;
-    font-weight: bold;
+.stButton > button {
+    background-color: #0d9488;
+    color: white;
+    border-radius: 8px;
     border: none;
-    border-radius: 10px;
-    min-height: 42px;
+    font-weight: 600;
 }
 .stButton > button:hover {
-    background: #5eead4;
-    color: #061522;
-}
-.hero {
-    background: linear-gradient(120deg, #123b4b, #14243a);
-    padding: 30px;
-    border-radius: 20px;
-    border: 1px solid #2dd4bf;
-    margin-bottom: 22px;
-}
-.hero h1 {
-    font-size: 38px;
-    margin-bottom: 10px;
-}
-.hero p {
-    color: #c1d1e5;
-    font-size: 17px;
-}
-hr {
-    border-color: #34465f;
+    background-color: #14b8a6;
+    color: white;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# =====================================================
-# PROJECT PATHS
-# =====================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-MODELS_DIR = os.path.join(BASE_DIR, "models")
-RESULTS_DIR = os.path.join(BASE_DIR, "results")
-SRC_DIR = os.path.join(BASE_DIR, "src")
+# ----------------------------------------------------------
+# CONSTANTS
+# ----------------------------------------------------------
+DATA_PATH = "data/supervised_customer_data.csv"
+FEATURES = ["Recency", "Frequency", "Monetary"]
+TARGET = "Purchase"
 
-MODEL_PATH = os.path.join(MODELS_DIR, "best_model.pkl")
-CUSTOMER_DATA_PATH = os.path.join(
-    DATA_DIR, "supervised_customer_data.csv"
-)
-MODEL_RESULTS_PATH = os.path.join(DATA_DIR, "model_results.csv")
-EVALUATION_PATH = os.path.join(DATA_DIR, "evaluation_results.csv")
-
-# =====================================================
-# HELPER FUNCTIONS
-# =====================================================
-def load_csv(path, name):
-    if not os.path.exists(path):
-        return None
-    try:
-        return pd.read_csv(path)
-    except Exception as error:
-        st.error(f"Unable to load {name}: {error}")
-        return None
+MODEL_PATHS = [
+    "models/best_tuned_model.pkl",
+    "models/best_ensemble_model.pkl",
+    "models/best_model.pkl"
+]
 
 
-def show_image(path, caption=None):
-    if os.path.exists(path):
-        st.image(path, caption=caption, use_container_width=True)
-    else:
-        st.info(f"Graph not found: {os.path.relpath(path, BASE_DIR)}")
+# ----------------------------------------------------------
+# LOAD DATA
+# ----------------------------------------------------------
+@st.cache_data
+def load_data():
+    data = pd.read_csv(DATA_PATH)
+
+    required = FEATURES + [TARGET]
+    missing = [c for c in required if c not in data.columns]
+
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    for col in required:
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    data = data.replace([np.inf, -np.inf], np.nan)
+    data = data.dropna(subset=[TARGET]).copy()
+    data[TARGET] = data[TARGET].astype(int)
+
+    if not set(data[TARGET].unique()).issubset({0, 1}):
+        raise ValueError("Purchase must contain only 0 and 1.")
+
+    return data
 
 
-def numeric_values(series):
-    return pd.to_numeric(series, errors="coerce").dropna()
+@st.cache_resource
+def load_trained_model():
+    errors = []
+
+    for path in MODEL_PATHS:
+        if os.path.exists(path):
+            try:
+                return joblib.load(path), path, None
+            except Exception as exc:
+                errors.append(f"{path}: {exc}")
+
+    return None, None, (
+        "No compatible model could be loaded. "
+        + " | ".join(errors)
+        if errors else
+        "No trained model file was found."
+    )
 
 
-def show_histogram(data, column, title, xlabel):
-    if column not in data.columns:
-        st.info(f"{column} is not available in the dataset.")
-        return
+try:
+    df = load_data()
+    data_error = None
+except Exception as exc:
+    df = None
+    data_error = str(exc)
 
-    values = numeric_values(data[column])
+model, model_path, model_error = load_trained_model()
 
-    if values.empty:
-        st.info(f"No numeric values available for {column}.")
-        return
 
+# ----------------------------------------------------------
+# HELPERS
+# ----------------------------------------------------------
+def make_chart():
     fig, ax = plt.subplots(figsize=(8, 4))
-    fig.patch.set_facecolor("#14243a")
-    ax.set_facecolor("#14243a")
-
-    ax.hist(values, bins=30, color="#2dd4bf", edgecolor="#08111f")
-    ax.set_title(title, color="white")
-    ax.set_xlabel(xlabel, color="white")
-    ax.set_ylabel("Customers", color="white")
-    ax.tick_params(colors="white")
-    ax.grid(axis="y", alpha=0.2)
+    fig.patch.set_facecolor("#111827")
+    ax.set_facecolor("#111827")
+    ax.tick_params(colors="#cbd5e1")
 
     for spine in ax.spines.values():
-        spine.set_color("#34465f")
+        spine.set_color("#334155")
 
-    fig.tight_layout()
-    st.pyplot(fig, use_container_width=True)
-    plt.close(fig)
+    ax.xaxis.label.set_color("#cbd5e1")
+    ax.yaxis.label.set_color("#cbd5e1")
+    ax.title.set_color("#f8fafc")
+
+    return fig, ax
 
 
-def show_results_table(data):
-    if data is None or data.empty:
-        st.info("Results are not available.")
-        return
+def evaluate_model(classifier, X_test, y_test):
+    predictions = classifier.predict(X_test)
 
-    display_data = data.copy()
+    result = {
+        "Accuracy": accuracy_score(y_test, predictions),
+        "Precision": precision_score(
+            y_test, predictions, zero_division=0
+        ),
+        "Recall": recall_score(
+            y_test, predictions, zero_division=0
+        ),
+        "F1 Score": f1_score(
+            y_test, predictions, zero_division=0
+        )
+    }
 
-    for column in [
-        "Accuracy", "Precision", "Recall", "F1 Score", "ROC-AUC"
-    ]:
-        if column in display_data.columns:
-            display_data[column] = pd.to_numeric(
-                display_data[column], errors="coerce"
-            ).round(4)
+    try:
+        probabilities = classifier.predict_proba(X_test)[:, 1]
+        result["ROC-AUC"] = roc_auc_score(y_test, probabilities)
+    except Exception:
+        probabilities = None
+        result["ROC-AUC"] = np.nan
 
-    st.dataframe(
-        display_data,
-        use_container_width=True,
-        hide_index=True
+    return result, predictions, probabilities
+
+
+def get_comparison_models():
+    return {
+        "Logistic Regression": LogisticRegression(
+            max_iter=2000,
+            class_weight="balanced",
+            random_state=42
+        ),
+        "Decision Tree": DecisionTreeClassifier(
+            max_depth=8,
+            class_weight="balanced",
+            random_state=42
+        ),
+        "Random Forest": RandomForestClassifier(
+            n_estimators=100,
+            max_depth=8,
+            class_weight="balanced",
+            random_state=42,
+            n_jobs=-1
+        ),
+        "AdaBoost": AdaBoostClassifier(
+            n_estimators=50,
+            learning_rate=0.5,
+            random_state=42
+        ),
+        "Gradient Boosting": GradientBoostingClassifier(
+            n_estimators=150,
+            learning_rate=0.1,
+            max_depth=1,
+            random_state=42
+        )
+    }
+
+
+# ----------------------------------------------------------
+# SIDEBAR
+# ----------------------------------------------------------
+with st.sidebar:
+    st.title("📊 SmartPredict")
+    st.caption("Customer Purchase Intelligence")
+    st.divider()
+
+    page = st.radio(
+        "NAVIGATION",
+        [
+            "🏠 Home",
+            "🔮 Customer Prediction",
+            "📁 Dataset Analysis",
+            "📈 Model Performance",
+            "🧪 Model Evaluation",
+            "🧠 Feature Selection",
+            "🤖 Ensemble Algorithms",
+            "🔬 Advanced Analysis"
+        ]
     )
 
+    st.divider()
 
-# =====================================================
-# LOAD DATA AND MODEL
-# =====================================================
-customer_data = load_csv(CUSTOMER_DATA_PATH, "customer dataset")
-results = load_csv(MODEL_RESULTS_PATH, "model results")
-evaluation = load_csv(EVALUATION_PATH, "evaluation results")
+    if df is not None:
+        st.metric("Customer Records", f"{len(df):,}")
 
-model = None
+    if model is not None:
+        st.success("Saved model loaded")
+        st.caption(model_path)
+    else:
+        st.warning("Saved model unavailable")
 
-if os.path.exists(MODEL_PATH):
-    try:
-        model = joblib.load(MODEL_PATH)
-    except Exception as error:
-        st.error(f"Unable to load trained model: {error}")
 
-# =====================================================
-# SIDEBAR
-# =====================================================
-st.sidebar.markdown("# 🛍️ Smart Analytics")
-st.sidebar.caption("CUSTOMER PURCHASE PREDICTION")
-st.sidebar.markdown("---")
+# ----------------------------------------------------------
+# VALIDATE DATASET
+# ----------------------------------------------------------
+if data_error:
+    st.error(f"Dataset error: {data_error}")
 
-page = st.sidebar.radio(
-    "NAVIGATION",
-    [
-        "🏠 Home",
-        "🎯 Customer Prediction",
-        "📊 Dataset Analysis",
-        "📈 Model Performance",
-        "🔍 Model Evaluation",
-        "🧪 Advanced Analysis",
-        "🧠 New Algorithms"
-    ]
-)
+if df is None:
+    st.error(
+        "Place supervised_customer_data.csv inside the data folder."
+    )
+    st.stop()
 
-st.sidebar.markdown("---")
-st.sidebar.caption("Machine Learning Mini Project")
-st.sidebar.caption("Python • Pandas • Scikit-learn")
 
-# =====================================================
-# HOME PAGE
-# =====================================================
+# ==========================================================
+# PAGE 1: HOME
+# ==========================================================
 if page == "🏠 Home":
+    st.title("Smart Customer Purchase Prediction")
+    st.subheader("AI-powered customer behavior analysis and prediction")
 
-    st.markdown("""
-    <div class="hero">
-        <h1>🛍️ Smart Customer Purchase Prediction</h1>
-        <p>
-        Machine learning dashboard to analyse customer behaviour,
-        compare algorithms and predict future purchasing activity.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.write(
+        "Analyze customer behavior using Recency, Frequency and "
+        "Monetary (RFM) features. Compare machine learning models, "
+        "predict customer purchases and explore customer segments."
+    )
 
-    best_model = "Not available"
+    st.divider()
 
-    if (
-        results is not None
-        and not results.empty
-        and {"Model", "F1 Score"}.issubset(results.columns)
-    ):
-        temp = results.copy()
-        temp["F1 Score"] = pd.to_numeric(
-            temp["F1 Score"], errors="coerce"
-        )
-        temp = temp.dropna(subset=["F1 Score"])
-
-        if not temp.empty:
-            best_model = temp.loc[
-                temp["F1 Score"].idxmax(), "Model"
-            ]
+    total = len(df)
+    buyers = int((df[TARGET] == 1).sum())
+    nonbuyers = int((df[TARGET] == 0).sum())
+    rate = buyers / total * 100 if total else 0
 
     c1, c2, c3, c4 = st.columns(4)
-
-    c1.metric(
-        "Total Customers",
-        f"{len(customer_data):,}"
-        if customer_data is not None else "N/A"
-    )
-    c2.metric("RFM Features", "3")
-    c3.metric("ML Algorithms", "4")
-    c4.metric("Best Model by F1", str(best_model))
-
-    st.markdown("---")
+    c1.metric("Customer Records", f"{total:,}")
+    c2.metric("Purchasers", f"{buyers:,}")
+    c3.metric("Non-Purchasers", f"{nonbuyers:,}")
+    c4.metric("Purchase Rate", f"{rate:.2f}%")
 
     left, right = st.columns(2)
 
     with left:
-        st.subheader("📌 Project Objective")
-        st.write(
-            "Analyse historical customer purchasing behaviour and "
-            "predict whether a customer may make a future purchase."
-        )
+        st.subheader("Purchase Distribution")
+        counts = df[TARGET].value_counts().sort_index()
 
-        st.subheader("📊 RFM Features")
-        st.markdown("""
-        - **Recency:** How recently a customer purchased.
-        - **Frequency:** Number of customer orders.
-        - **Monetary:** Total recorded customer spending.
-        """)
+        fig, ax = make_chart()
+        ax.bar(
+            [
+                "No Purchase" if x == 0 else "Purchase"
+                for x in counts.index
+            ],
+            counts.values
+        )
+        ax.set_ylabel("Customers")
+        ax.set_title("Customer Purchase Distribution")
+        st.pyplot(fig)
+        plt.close(fig)
 
     with right:
-        st.subheader("⚙️ Project Workflow")
-        st.markdown("""
-        1. Collect retail transaction data.
-        2. Clean missing and invalid records.
-        3. Calculate RFM features.
-        4. Prepare the purchase target.
-        5. Train machine learning algorithms.
-        6. Evaluate model performance.
-        7. Predict future customer behaviour.
-        """)
+        st.subheader("RFM Summary")
+        st.dataframe(
+            df[FEATURES].describe().round(2),
+            use_container_width=True
+        )
 
-    st.markdown("---")
-    st.subheader("📈 Customer Insights")
-
-    if customer_data is not None and not customer_data.empty:
-        features = [
-            x for x in ["Recency", "Frequency", "Monetary"]
-            if x in customer_data.columns
-        ]
-
-        columns = st.columns(max(1, len(features)))
-
-        for index, feature in enumerate(features):
-            values = numeric_values(customer_data[feature])
-            average = values.mean() if not values.empty else 0
-
-            columns[index].metric(
-                f"Average {feature}",
-                f"{average:,.2f}"
-            )
-    else:
-        st.info("Customer dataset is not available yet.")
-
-# =====================================================
-# CUSTOMER PREDICTION
-# =====================================================
-elif page == "🎯 Customer Prediction":
-
-    st.title("🎯 Customer Purchase Prediction")
-    st.write(
-        "Enter customer RFM information to generate a prediction."
+    st.info(
+        "Model predictions are estimates and depend on the "
+        "training data and definition of the Purchase target."
     )
-    st.markdown("---")
+
+
+# ==========================================================
+# PAGE 2: CUSTOMER PREDICTION
+# ==========================================================
+elif page == "🔮 Customer Prediction":
+    st.title("🔮 Customer Purchase Prediction")
+
+    st.write("Enter a customer's RFM values.")
+
+    if model is None:
+        st.error("The saved model could not be loaded.")
+        st.code("python improve_model.py")
+        if model_error:
+            st.caption(model_error)
+        st.stop()
 
     with st.form("prediction_form"):
-
         c1, c2, c3 = st.columns(3)
 
         with c1:
             recency = st.number_input(
-                "Recency (Days)", 0, 1000, 30
+                "Recency (days)", 0.0, 10000.0, 30.0
             )
 
         with c2:
             frequency = st.number_input(
-                "Frequency (Orders)", 1, 1000, 10
+                "Frequency (orders)", 0.0, 100000.0, 3.0
             )
 
         with c3:
             monetary = st.number_input(
-                "Monetary Value", 0.0, 1000000.0, 1000.0,
-                step=100.0
+                "Monetary (spending)", 0.0, 100000000.0, 1000.0
             )
 
         submitted = st.form_submit_button(
-            "🔮 Predict Purchase",
+            "Predict Purchase",
             use_container_width=True
         )
 
     if submitted:
+        customer = pd.DataFrame([{
+            "Recency": recency,
+            "Frequency": frequency,
+            "Monetary": monetary
+        }])
 
-        if model is None:
-            st.error(
-                "Trained model not found. Check models/best_model.pkl."
-            )
+        try:
+            prediction = int(model.predict(customer)[0])
 
-        else:
-            input_data = pd.DataFrame({
-                "Recency": [recency],
-                "Frequency": [frequency],
-                "Monetary": [monetary]
-            })
-
-            try:
-                prediction = model.predict(input_data)[0]
-
-                st.markdown("---")
-                left, right = st.columns(2)
-
-                with left:
-                    if int(prediction) == 1:
-                        st.success(
-                            "🟢 Model predicts a future purchase."
-                        )
-                    else:
-                        st.warning(
-                            "🔴 Model predicts no future purchase."
-                        )
-
-                with right:
-                    if hasattr(model, "predict_proba"):
-                        probabilities = model.predict_proba(input_data)[0]
-                        classes = list(model.classes_)
-
-                        probability = (
-                            float(probabilities[classes.index(1)])
-                            if 1 in classes else 0.0
-                        )
-
-                        st.metric(
-                            "Estimated Purchase Probability",
-                            f"{probability * 100:.2f}%"
-                        )
-
-                st.subheader("Customer Input")
-                st.dataframe(
-                    input_data,
-                    use_container_width=True,
-                    hide_index=True
+            probability = None
+            if hasattr(model, "predict_proba"):
+                probability = float(
+                    model.predict_proba(customer)[0][1]
                 )
 
-                st.caption(
-                    "Predictions are model estimates, not guarantees."
-                )
+            st.divider()
+            left, right = st.columns(2)
 
-            except Exception as error:
-                st.error(f"Prediction failed: {error}")
+            with left:
+                if prediction == 1:
+                    st.success("Likely to Purchase")
+                else:
+                    st.warning("Unlikely to Purchase")
 
-# =====================================================
-# DATASET ANALYSIS
-# =====================================================
-elif page == "📊 Dataset Analysis":
+            with right:
+                if probability is not None:
+                    st.metric(
+                        "Estimated Purchase Probability",
+                        f"{probability * 100:.2f}%"
+                    )
 
-    st.title("📊 Customer Dataset Analysis")
-    st.write("Explore customer-level data and RFM distributions.")
+        except Exception as exc:
+            st.error(f"Prediction failed: {exc}")
 
-    if customer_data is None:
-        st.warning(
-            "Dataset not found. Check data/supervised_customer_data.csv."
+
+# ==========================================================
+# PAGE 3: DATASET ANALYSIS
+# ==========================================================
+elif page == "📁 Dataset Analysis":
+    st.title("📁 Dataset Analysis")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Rows", f"{len(df):,}")
+    c2.metric("Columns", len(df.columns))
+    c3.metric("Duplicate Rows", f"{df.duplicated().sum():,}")
+
+    st.subheader("Dataset Preview")
+    st.dataframe(df.head(100), use_container_width=True)
+
+    st.subheader("Missing Values and Data Types")
+    details = pd.DataFrame({
+        "Column": df.columns,
+        "Data Type": df.dtypes.astype(str).values,
+        "Missing Values": df.isna().sum().values
+    })
+    st.dataframe(details, use_container_width=True)
+
+    st.subheader("Descriptive Statistics")
+    st.dataframe(df.describe().T, use_container_width=True)
+
+    feature = st.selectbox("Choose a feature", FEATURES)
+
+    fig, ax = make_chart()
+    ax.hist(df[feature].dropna(), bins=30)
+    ax.set_title(f"Distribution of {feature}")
+    ax.set_xlabel(feature)
+    ax.set_ylabel("Count")
+    st.pyplot(fig)
+    plt.close(fig)
+
+    st.subheader("Feature Correlation")
+    corr = df[FEATURES + [TARGET]].corr()
+
+    fig, ax = make_chart()
+    image = ax.imshow(corr.values, aspect="auto")
+    ax.set_xticks(range(len(corr.columns)))
+    ax.set_xticklabels(corr.columns, rotation=45, ha="right")
+    ax.set_yticks(range(len(corr.index)))
+    ax.set_yticklabels(corr.index)
+    fig.colorbar(image, ax=ax)
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+    st.download_button(
+        "Download Dataset CSV",
+        df.to_csv(index=False).encode("utf-8"),
+        "customer_dataset.csv",
+        "text/csv"
+    )
+
+
+# ==========================================================
+# PAGE 4: MODEL PERFORMANCE — ALL SIX MODELS
+# ==========================================================
+elif page == "📈 Model Performance":
+    st.title("📈 Complete Model Comparison")
+
+    st.write(
+        "Compare Logistic Regression, Decision Tree, Random Forest, "
+        "AdaBoost, Gradient Boosting and Voting Classifier."
+    )
+
+    st.warning(
+        "Clicking the button trains new comparison models. "
+        "The results may differ from your earlier tuned-model results."
+    )
+
+    if st.button("Train and Compare All Six Models",
+                 use_container_width=True):
+
+        X = df[FEATURES]
+        y = df[TARGET]
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=0.20,
+            random_state=42,
+            stratify=y
         )
 
-    else:
-        c1, c2, c3 = st.columns(3)
+        # Fit imputer only on training data
+        imputer = SimpleImputer(strategy="median")
+        X_train_imp = imputer.fit_transform(X_train)
+        X_test_imp = imputer.transform(X_test)
 
-        c1.metric("Total Customers", f"{len(customer_data):,}")
+        models = get_comparison_models()
+        rows = []
 
-        if "Recency" in customer_data.columns:
-            c2.metric(
-                "Average Recency",
-                f"{numeric_values(customer_data['Recency']).mean():.2f} days"
+        progress = st.progress(0)
+        status = st.empty()
+
+        for i, (name, classifier) in enumerate(models.items()):
+            status.write(f"Training {name}...")
+
+            classifier.fit(X_train_imp, y_train)
+            metrics, _, _ = evaluate_model(
+                classifier, X_test_imp, y_test
             )
 
-        if "Monetary" in customer_data.columns:
-            c3.metric(
-                "Average Monetary",
-                f"{numeric_values(customer_data['Monetary']).mean():,.2f}"
-            )
+            rows.append({"Model": name, **metrics})
+            progress.progress((i + 1) / 6)
 
-        st.markdown("---")
-        st.subheader("Customer Data Preview")
+        status.write("Training Voting Classifier...")
+
+        voting = VotingClassifier(
+            estimators=[
+                ("lr", LogisticRegression(
+                    max_iter=2000, random_state=42
+                )),
+                ("rf", RandomForestClassifier(
+                    n_estimators=100, random_state=42
+                )),
+                ("gb", GradientBoostingClassifier(
+                    n_estimators=100, random_state=42
+                ))
+            ],
+            voting="soft"
+        )
+
+        voting.fit(X_train_imp, y_train)
+        voting_metrics, _, _ = evaluate_model(
+            voting, X_test_imp, y_test
+        )
+        rows.append({
+            "Model": "Voting Classifier",
+            **voting_metrics
+        })
+
+        progress.progress(1.0)
+        status.success("Comparison completed.")
+
+        results = pd.DataFrame(rows).sort_values(
+            "Accuracy", ascending=False
+        )
+
+        os.makedirs("data", exist_ok=True)
+        results.to_csv(
+            "data/all_model_comparison.csv", index=False
+        )
+
+        st.subheader("Actual Test Results")
         st.dataframe(
-            customer_data.head(100),
+            results.round(4),
             use_container_width=True
         )
 
-        left, right = st.columns(2)
+        fig, ax = make_chart()
+        ax.bar(results["Model"], results["Accuracy"])
+        ax.set_ylim(0, 1)
+        ax.set_ylabel("Test Accuracy")
+        ax.set_title("Comparison of All Six Models")
+        ax.tick_params(axis="x", rotation=35)
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
 
-        with left:
-            show_histogram(
-                customer_data, "Recency",
-                "Recency Distribution", "Days"
-            )
-            show_histogram(
-                customer_data, "Monetary",
-                "Monetary Distribution", "Monetary Value"
-            )
+        st.download_button(
+            "Download Model Comparison",
+            results.to_csv(index=False).encode("utf-8"),
+            "all_model_comparison.csv",
+            "text/csv"
+        )
 
-        with right:
-            show_histogram(
-                customer_data, "Frequency",
-                "Purchase Frequency", "Number of Orders"
-            )
+    # Display previously saved results when available
+    saved_path = "data/all_model_comparison.csv"
 
-            st.info("""
-            **How to interpret RFM**
+    if os.path.exists(saved_path):
+        st.subheader("Last Saved Comparison")
+        saved = pd.read_csv(saved_path)
+        st.dataframe(saved.round(4), use_container_width=True)
 
-            - Lower recency means a more recent purchase.
-            - Higher frequency means more orders.
-            - Monetary represents recorded spending.
-            """)
 
-# =====================================================
-# MODEL PERFORMANCE
-# =====================================================
-elif page == "📈 Model Performance":
+# ==========================================================
+# PAGE 5: MODEL EVALUATION
+# ==========================================================
+elif page == "🧪 Model Evaluation":
+    st.title("🧪 Model Evaluation")
 
-    st.title("📈 Machine Learning Model Performance")
-    st.write("Compare the results of the supervised algorithms.")
+    if model is None:
+        st.error("No saved model is available.")
+        if model_error:
+            st.caption(model_error)
+        st.stop()
 
-    if results is None:
-        st.info("File data/model_results.csv is not available.")
+    X = df[FEATURES]
+    y = df[TARGET]
 
-    else:
-        show_results_table(results)
-
-        metrics = [
-            x for x in
-            ["Accuracy", "Precision", "Recall", "F1 Score", "ROC-AUC"]
-            if x in results.columns
-        ]
-
-        if "Model" in results.columns and metrics:
-
-            selected_metric = st.selectbox(
-                "Select comparison metric", metrics
-            )
-
-            plot_data = results[["Model", selected_metric]].copy()
-            plot_data[selected_metric] = pd.to_numeric(
-                plot_data[selected_metric], errors="coerce"
-            )
-            plot_data = plot_data.dropna()
-
-            if not plot_data.empty:
-
-                fig, ax = plt.subplots(figsize=(10, 5))
-                fig.patch.set_facecolor("#14243a")
-                ax.set_facecolor("#14243a")
-
-                bars = ax.bar(
-                    plot_data["Model"].astype(str),
-                    plot_data[selected_metric],
-                    color="#2dd4bf"
-                )
-
-                ax.set_ylim(0, 1)
-                ax.set_ylabel(selected_metric, color="white")
-                ax.set_title(
-                    f"{selected_metric} Comparison",
-                    color="white"
-                )
-                ax.tick_params(axis="x", rotation=20, colors="white")
-                ax.tick_params(axis="y", colors="white")
-                ax.grid(axis="y", alpha=0.2)
-
-                for bar, value in zip(
-                    bars, plot_data[selected_metric]
-                ):
-                    ax.text(
-                        bar.get_x() + bar.get_width() / 2,
-                        bar.get_height() + 0.015,
-                        f"{value:.3f}",
-                        ha="center",
-                        color="white"
-                    )
-
-                fig.tight_layout()
-                st.pyplot(fig, use_container_width=True)
-                plt.close(fig)
-
-                best = plot_data.loc[
-                    plot_data[selected_metric].idxmax()
-                ]
-
-                st.success(
-                    f"Highest {selected_metric}: {best['Model']} "
-                    f"({best[selected_metric]:.4f})"
-                )
-
-    st.markdown("---")
-    st.subheader("Additional Model Comparison")
-    show_image(
-        os.path.join(RESULTS_DIR, "model_comparison.png")
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y,
+        test_size=0.20,
+        random_state=42,
+        stratify=y
     )
 
-# =====================================================
-# MODEL EVALUATION
-# =====================================================
-elif page == "🔍 Model Evaluation":
+    try:
+        predictions = model.predict(X_test)
 
-    st.title("🔍 Detailed Model Evaluation")
+        probabilities = None
+        if hasattr(model, "predict_proba"):
+            probabilities = model.predict_proba(X_test)[:, 1]
 
-    if evaluation is not None:
-        st.subheader("Evaluation Metrics")
-        show_results_table(evaluation)
+        accuracy = accuracy_score(y_test, predictions)
+        precision = precision_score(
+            y_test, predictions, zero_division=0
+        )
+        recall = recall_score(
+            y_test, predictions, zero_division=0
+        )
+        f1 = f1_score(y_test, predictions, zero_division=0)
 
-    st.markdown("---")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Accuracy", f"{accuracy * 100:.2f}%")
+        c2.metric("Precision", f"{precision * 100:.2f}%")
+        c3.metric("Recall", f"{recall * 100:.2f}%")
+        c4.metric("F1 Score", f"{f1 * 100:.2f}%")
 
-    left, right = st.columns(2)
+        st.subheader("Classification Report")
+        report = classification_report(
+            y_test, predictions,
+            output_dict=True, zero_division=0
+        )
+        st.dataframe(
+            pd.DataFrame(report).T,
+            use_container_width=True
+        )
 
-    with left:
         st.subheader("Confusion Matrix")
-        show_image(
-            os.path.join(BASE_DIR, "confusion_matrix.png")
-        )
+        cm = confusion_matrix(y_test, predictions, labels=[0, 1])
 
-    with right:
-        st.subheader("ROC Curve")
-        show_image(
-            os.path.join(BASE_DIR, "roc_curve.png")
-        )
+        fig, ax = make_chart()
+        image = ax.imshow(cm)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["Predicted 0", "Predicted 1"])
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(["Actual 0", "Actual 1"])
 
-    st.markdown("---")
-    st.subheader("Feature Importance")
-    show_image(
-        os.path.join(BASE_DIR, "feature_importance.png")
+        for i in range(2):
+            for j in range(2):
+                ax.text(
+                    j, i, str(cm[i, j]),
+                    ha="center", va="center", color="white"
+                )
+
+        fig.colorbar(image, ax=ax)
+        st.pyplot(fig)
+        plt.close(fig)
+
+        if probabilities is not None:
+            auc = roc_auc_score(y_test, probabilities)
+            fpr, tpr, _ = roc_curve(y_test, probabilities)
+
+            st.metric("ROC-AUC", f"{auc:.4f}")
+
+            fig, ax = make_chart()
+            ax.plot(fpr, tpr, label=f"AUC = {auc:.3f}")
+            ax.plot([0, 1], [0, 1], "--")
+            ax.set_xlabel("False Positive Rate")
+            ax.set_ylabel("True Positive Rate")
+            ax.set_title("ROC Curve")
+            ax.legend()
+            st.pyplot(fig)
+            plt.close(fig)
+
+    except Exception as exc:
+        st.error(f"Evaluation failed: {exc}")
+
+
+# ==========================================================
+# PAGE 6: FEATURE SELECTION
+# ==========================================================
+elif page == "🧠 Feature Selection":
+    st.title("🧠 Feature Selection")
+
+    X = df[FEATURES]
+    y = df[TARGET]
+
+    imputer = SimpleImputer(strategy="median")
+    X_imp = imputer.fit_transform(X)
+
+    selector = SelectKBest(score_func=f_classif, k="all")
+    selector.fit(X_imp, y)
+    anova = np.nan_to_num(selector.scores_, nan=0.0)
+
+    mi = mutual_info_classif(
+        X_imp, y, random_state=42
     )
 
-    st.info("""
-    **Evaluation Metrics**
-
-    - Accuracy: Overall correctness.
-    - Precision: Correctness of predicted purchases.
-    - Recall: Actual purchases identified.
-    - F1 Score: Balance between precision and recall.
-    - ROC-AUC: Ability to distinguish between classes.
-    """)
-
-# =====================================================
-# ADVANCED ANALYSIS
-# =====================================================
-elif page == "🧪 Advanced Analysis":
-
-    st.title("🧪 Advanced Model Analysis")
-
-    st.subheader("1. Model Comparison")
-
-    comparison_csv = os.path.join(
-        RESULTS_DIR, "all_model_evaluation.csv"
+    rf = RandomForestClassifier(
+        n_estimators=200, random_state=42
     )
-    comparison_data = load_csv(
-        comparison_csv, "all-model evaluation"
+    rf.fit(X_imp, y)
+
+    results = pd.DataFrame({
+        "Feature": FEATURES,
+        "ANOVA F Score": anova,
+        "Mutual Information": mi,
+        "Random Forest Importance": rf.feature_importances_
+    })
+
+    st.dataframe(results, use_container_width=True)
+
+    metric = st.selectbox(
+        "Ranking method",
+        [
+            "ANOVA F Score",
+            "Mutual Information",
+            "Random Forest Importance"
+        ]
     )
 
-    if comparison_data is not None:
-        show_results_table(comparison_data)
-    else:
-        st.info("Additional comparison CSV is not available.")
+    ordered = results.sort_values(metric)
 
-    show_image(
-        os.path.join(RESULTS_DIR, "model_comparison.png"),
-        "Model Comparison"
-    )
+    fig, ax = make_chart()
+    ax.barh(ordered["Feature"], ordered[metric])
+    ax.set_xlabel(metric)
+    ax.set_title("Feature Relevance")
+    st.pyplot(fig)
+    plt.close(fig)
 
-    st.markdown("---")
-    st.subheader("2. ROC Curve Comparison")
-    show_image(
-        os.path.join(RESULTS_DIR, "roc_comparison.png")
-    )
 
-    st.markdown("---")
-    st.subheader("3. Confusion Matrices")
-    show_image(
-        os.path.join(
-            RESULTS_DIR, "all_model_confusion_matrices.png"
-        )
-    )
+# ==========================================================
+# PAGE 7: ENSEMBLE ALGORITHMS
+# ==========================================================
+elif page == "🤖 Ensemble Algorithms":
+    st.title("🤖 Ensemble Algorithms")
 
-    st.markdown("---")
-    st.subheader("4. Feature Importance")
-
-    left, right = st.columns(2)
-
-    with left:
-        st.write("Random Forest")
-        show_image(
-            os.path.join(
-                RESULTS_DIR, "random_forest_importance.png"
-            )
-        )
-
-    with right:
-        st.write("Gradient Boosting")
-        show_image(
-            os.path.join(
-                RESULTS_DIR, "gradient_boosting_importance.png"
-            )
-        )
-
-    st.markdown("---")
-    st.subheader("5. Feature Distributions")
-
-    for title, filename in [
-        ("Recency Distribution", "recency_distribution.png"),
-        ("Frequency Distribution", "frequency_distribution.png"),
-        ("Monetary Distribution", "monetary_distribution.png"),
-        ("Feature Comparison", "feature_comparison.png")
-    ]:
-        st.write(title)
-        show_image(os.path.join(RESULTS_DIR, filename))
-
-    st.markdown("---")
-    st.subheader("6. ROC-AUC Results")
-
-    auc_data = load_csv(
-        os.path.join(RESULTS_DIR, "roc_auc_comparison.csv"),
-        "ROC-AUC comparison"
-    )
-
-    if auc_data is not None:
-        st.dataframe(auc_data, use_container_width=True)
-    else:
-        st.info("ROC-AUC comparison CSV is not available.")
-
-# =====================================================
-# NEW ALGORITHMS
-# =====================================================
-elif page == "🧠 New Algorithms":
-
-    st.title("🧠 Additional Machine Learning Algorithms")
     st.write(
-        "Check the availability of the extra algorithm scripts "
-        "in your src folder."
+        "Train and compare AdaBoost, Gradient Boosting and "
+        "Voting Classifier on the same train/test split."
     )
 
-    st.markdown("---")
+    if st.button("Train Ensemble Models",
+                 use_container_width=True):
 
-    algorithms = {
-        "Customer Clustering": "customer_clustering.py",
-        "AdaBoost and Gradient Boosting": "ensemble_comparison.py",
-        "HMM Demonstration": "hmm_algorithms.py"
-    }
+        X = df[FEATURES]
+        y = df[TARGET]
 
-    for name, filename in algorithms.items():
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=0.20,
+            random_state=42,
+            stratify=y
+        )
 
-        script_path = os.path.join(SRC_DIR, filename)
+        imputer = SimpleImputer(strategy="median")
+        X_train_imp = imputer.fit_transform(X_train)
+        X_test_imp = imputer.transform(X_test)
 
-        with st.expander(name):
+        models = {
+            "AdaBoost": AdaBoostClassifier(
+                n_estimators=50,
+                learning_rate=0.5,
+                random_state=42
+            ),
+            "Gradient Boosting": GradientBoostingClassifier(
+                n_estimators=150,
+                learning_rate=0.1,
+                max_depth=1,
+                random_state=42
+            ),
+            "Voting Classifier": VotingClassifier(
+                estimators=[
+                    ("lr", LogisticRegression(
+                        max_iter=2000, random_state=42
+                    )),
+                    ("rf", RandomForestClassifier(
+                        n_estimators=100, random_state=42
+                    )),
+                    ("gb", GradientBoostingClassifier(
+                        n_estimators=100, random_state=42
+                    ))
+                ],
+                voting="soft"
+            )
+        }
 
-            if os.path.exists(script_path):
-                st.success(f"Script found: src/{filename}")
-            else:
-                st.warning(f"Script not found: src/{filename}")
+        rows = []
+        progress = st.progress(0)
 
-    st.info("""
-    **Algorithms covered**
+        for i, (name, classifier) in enumerate(models.items()):
+            classifier.fit(X_train_imp, y_train)
+            metrics, _, _ = evaluate_model(
+                classifier, X_test_imp, y_test
+            )
+            rows.append({"Model": name, **metrics})
+            progress.progress((i + 1) / len(models))
 
-    - K-Means, K-Medoids and DBSCAN: customer clustering.
-    - AdaBoost and Gradient Boosting: ensemble learning.
-    - HMM: Hidden Markov Model educational demonstration.
+        results = pd.DataFrame(rows)
+        st.dataframe(results.round(4), use_container_width=True)
 
-    These modules must exist in your src folder to be available.
-    The HMM example should not be treated as a validated purchase
-    prediction unless it has been appropriately trained and evaluated.
-    """)
+        fig, ax = make_chart()
+        ax.bar(results["Model"], results["Accuracy"])
+        ax.set_ylim(0, 1)
+        ax.set_ylabel("Accuracy")
+        ax.set_title("Ensemble Comparison")
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
 
-# =====================================================
+        st.download_button(
+            "Download Ensemble Results",
+            results.to_csv(index=False).encode("utf-8"),
+            "ensemble_results.csv",
+            "text/csv"
+        )
+
+
+# ==========================================================
+# PAGE 8: ADVANCED ANALYSIS
+# ==========================================================
+elif page == "🔬 Advanced Analysis":
+    st.title("🔬 Advanced Customer Analysis")
+
+    analysis = st.selectbox(
+        "Choose analysis",
+        [
+            "RFM Scatter Analysis",
+            "DBSCAN Clustering",
+            "K-Medoids-style Clustering"
+        ]
+    )
+
+    if analysis == "RFM Scatter Analysis":
+        x_col = st.selectbox("X-axis", FEATURES, index=0)
+        y_col = st.selectbox("Y-axis", FEATURES, index=1)
+
+        fig, ax = make_chart()
+
+        for label, name in [(0, "No Purchase"), (1, "Purchase")]:
+            subset = df[df[TARGET] == label]
+            ax.scatter(
+                subset[x_col], subset[y_col],
+                alpha=0.6, label=name
+            )
+
+        ax.set_xlabel(x_col)
+        ax.set_ylabel(y_col)
+        ax.legend()
+        st.pyplot(fig)
+        plt.close(fig)
+
+    elif analysis == "DBSCAN Clustering":
+        eps = st.slider("Epsilon", 0.1, 3.0, 0.7, 0.1)
+        min_samples = st.slider("Minimum samples", 2, 20, 5)
+
+        if st.button("Run DBSCAN"):
+            X_imp = SimpleImputer(
+                strategy="median"
+            ).fit_transform(df[FEATURES])
+
+            X_scaled = StandardScaler().fit_transform(X_imp)
+
+            labels = DBSCAN(
+                eps=eps, min_samples=min_samples
+            ).fit_predict(X_scaled)
+
+            output = df.copy()
+            output["Cluster"] = labels
+
+            st.subheader("Cluster Counts")
+            st.dataframe(
+                output["Cluster"].value_counts().sort_index()
+                .rename("Customers")
+            )
+
+            st.metric(
+                "Clusters excluding noise",
+                len(set(labels) - {-1})
+            )
+            st.metric(
+                "Noise records",
+                int((labels == -1).sum())
+            )
+
+            fig, ax = make_chart()
+            scatter = ax.scatter(
+                X_scaled[:, 0], X_scaled[:, 1],
+                c=labels, alpha=0.7
+            )
+            ax.set_xlabel("Scaled Recency")
+            ax.set_ylabel("Scaled Frequency")
+            fig.colorbar(scatter, ax=ax)
+            st.pyplot(fig)
+            plt.close(fig)
+
+            st.download_button(
+                "Download DBSCAN Results",
+                output.to_csv(index=False).encode("utf-8"),
+                "dbscan_clusters.csv",
+                "text/csv"
+            )
+
+    elif analysis == "K-Medoids-style Clustering":
+        st.caption(
+            "Educational PAM-style clustering on a sample of customers."
+        )
+
+        k = st.slider("Number of clusters", 2, 8, 3)
+        sample_size = min(600, len(df))
+
+        if st.button("Run K-Medoids-style Clustering"):
+            if sample_size <= k:
+                st.error("Not enough customers for this value of k.")
+                st.stop()
+
+            sample = df[FEATURES].sample(
+                n=sample_size, random_state=42
+            ).reset_index(drop=True)
+
+            X_imp = SimpleImputer(
+                strategy="median"
+            ).fit_transform(sample[FEATURES])
+
+            X_scaled = StandardScaler().fit_transform(X_imp)
+            distances = pairwise_distances(X_scaled)
+
+            rng = np.random.default_rng(42)
+            medoids = rng.choice(
+                sample_size, size=k, replace=False
+            )
+
+            for _ in range(20):
+                labels = np.argmin(
+                    distances[:, medoids], axis=1
+                )
+                new_medoids = medoids.copy()
+
+                for cluster_id in range(k):
+                    members = np.where(labels == cluster_id)[0]
+
+                    if len(members) == 0:
+                        continue
+
+                    costs = distances[
+                        np.ix_(members, members)
+                    ].sum(axis=1)
+
+                    new_medoids[cluster_id] = members[
+                        np.argmin(costs)
+                    ]
+
+                if np.array_equal(new_medoids, medoids):
+                    break
+
+                medoids = new_medoids
+
+            labels = np.argmin(distances[:, medoids], axis=1)
+            output = sample.copy()
+            output["Cluster"] = labels
+
+            st.subheader("Cluster Summary")
+            st.dataframe(
+                output.groupby("Cluster")[FEATURES].mean().round(2),
+                use_container_width=True
+            )
+
+            fig, ax = make_chart()
+            scatter = ax.scatter(
+                X_scaled[:, 0], X_scaled[:, 1],
+                c=labels, alpha=0.7
+            )
+            ax.scatter(
+                X_scaled[medoids, 0],
+                X_scaled[medoids, 1],
+                marker="X", s=160, label="Medoids"
+            )
+            ax.set_xlabel("Scaled Recency")
+            ax.set_ylabel("Scaled Frequency")
+            ax.legend()
+            fig.colorbar(scatter, ax=ax)
+            st.pyplot(fig)
+            plt.close(fig)
+
+            st.download_button(
+                "Download K-Medoids Results",
+                output.to_csv(index=False).encode("utf-8"),
+                "kmedoids_clusters.csv",
+                "text/csv"
+            )
+
+
+# ----------------------------------------------------------
 # FOOTER
-# =====================================================
-st.markdown("---")
-st.markdown(
-    "<center>Smart Customer Purchase Prediction | "
-    "Machine Learning Mini Project</center>",
-    unsafe_allow_html=True
+# ----------------------------------------------------------
+st.divider()
+st.caption(
+    "Smart Customer Purchase Prediction | Machine Learning Project"
 )

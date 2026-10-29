@@ -24,4 +24,23 @@ models/*.pkl
 .streamlit/
 
 # Jupyter
-.ipynb_checkpoints/
+.ipynb_checkpoints/# Original and processed datasets
+data/*.xlsx
+data/*.csv
+
+# Generated model artifacts
+models/*.pkl
+
+# Temporary comparison files
+app_github.py
+app_local.py
+github_version.txt
+local_version.txt
+app.py.backup
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Java compiled files
+*.class
